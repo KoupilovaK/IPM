@@ -1,0 +1,782 @@
+
+#################################################################################################
+### Content of R-script ###
+#################################################################################################
+
+### Content ###
+
+# Table of coefficients for vital-rates functions 
+# Vital-rates functions
+# IPM kernels 
+# Population growth rates 
+# Elasticities of population growth rates 
+# Stable stage distribution 
+
+
+### Packages ###
+
+library(popbio)
+library(IPMpack)
+
+
+
+#################################################################################################
+### Table of coefficients for vital-rates functions ###
+#################################################################################################
+
+# The object 'koef2' contains the coefficients, it is of the class data.frame and is structured as follows:
+# Rows = each row for one block (i.e., site ? transition combination)
+# Columns = each column for one coefficient 
+
+# The values of coefficients used in the IPM models are to be found in Tables S4, S6 and S7.
+
+# Notation of coefficients (following the order of coefficients in Tables S4, S6 and S7):
+
+# preziv.int = probability of survival to t+1, intercept
+# preziv.size = probability of survival to t+1, effect of plant size at t
+# rust.int = growth (plant size at t+1), intercept
+# rust.size = growth (plant size at t+1), effect of plant size at t
+# rust.size2 = growth (plant size at t+1), effect of quadratic term of plant size at t
+# rust.sigma2 = growth (plant size at t+1), residual standard error (RSE) to the power of 2 
+# rust.sigma2.exp = growth (plant size at t+1), estimated variance coefficient 
+# zname.int = disease state (being determinable at t+1), intercept for plants indeterminable at t
+# zname.size = disease state (being determinable at t+1), effect of plant size at t
+# zname.nak0 = disease state (being determinable at t+1), effect of healthy state at t
+# zname.nak1 = disease state (being determinable at t+1), effect of diseased state at t
+# nakaz.int = disease state (being diseased at t+1), intercept for plants indeterminable at t
+# nakaz.size = disease state (being diseased at t+1), effect of plant size at t
+# nakaz.nak0 = disease state (being diseased at t+1), effect of healthy state at t
+# nakaz.nak1 = disease state (being diseased at t+1), effect of diseased state at t
+# vykve.int = probability of flowering at t, intercept
+# vykve.size = probability of flowering at t, effect of plant size at t
+# kvety.int = number of flowers, intercept for plants indeterminable at t
+# kvety.size = number of flowers, effect of plant size at t
+# kvety.size2 = number of flowers, effect of quadratic term of plant size at t
+# kvety.nak0 = number of flowers, effect of healthy state at t
+# kvety.nak1 = number of flowers, effect of diseased state at t
+# cast.int = probability of being partially diseased at t, intercept
+# cast.size = probability of being partially diseased at t, effect of plant size at t
+# pdp.tobol = probability of capsule development
+# pdp.preda = probability of seed predation of capsule
+# nepreda.semen = number of seeds per intact capsule
+# preda.semen = number of seeds per predated capsule 
+# establish = probability of establishment of seeds to Sdl1 (one-year-old seedlings)
+# preziv.s1 = probability of survival of Sdl1
+# preziv.s2 = probability of survival of Sdl2 (two-year-old seedlings)
+# preziv.s3 = probability of survival of Sdl3 (three-year-old seedlings)
+# rust.s = growth of Sdl3 (mean plant size at t+1)
+# zname.s = disease state of Sdl3 (probability of being determinable at t+1)
+# nakazeny.s = disease state of Sdl3 (probability of being diseased at t+1)  
+# vykve.s = probability of flowering of Sdl3 at t
+# kvety.s = number of flowers of Sdl3
+
+
+
+#################################################################################################
+### Vital-rates functions ###
+#################################################################################################
+
+# Notation of function parameters:
+# koef = table of coefficients
+# xmat = matrix of meshpoints (= midpoints of kernel cells), based on plant size and on disease state when applicable (disease state has three possible values: '0' = Healthy, '1' = Diseased, 'nevim' = Indeterminable)
+# poradX, poradY = vectors used for calling elements from xmat
+
+
+### Extraction of vectors from table of coefficients ###
+t.param<-function(x){
+  x2<-x
+  if(class(x)=="data.frame"){
+    x2<-as.vector(as.matrix(x))
+  }
+  names(x2)<-names(x)
+  return(x2)
+}
+
+
+### Survival function ###
+
+zijx<-function(poradX,xmat,koef){
+  param<-t.param(koef)
+  u<- param["preziv.int"] + 
+    param["preziv.size"]*xmat[poradX,1]
+  return(antilogit(u))
+}
+
+
+### Growth function (including disease function) for diseased populations ###
+
+rustx=function(poradY,poradX,xmat,koef) { 
+  param<-t.param(koef)
+  mu<- param["rust.int"]+
+    param["rust.size"]*xmat[poradX,1]+
+    param["rust.size2"]*xmat[poradX,1]*xmat[poradX,1]
+  zname<-ifelse(xmat[poradX,2]=="nevim",
+                antilogit(param["zname.int"]+
+                            param["zname.size"]*xmat[poradX,1]),
+                ifelse (xmat[poradX,2]=="0",
+                        antilogit(param["zname.int"]+
+                                    param["zname.size"]*xmat[poradX,1]+
+                                    param["zname.nak0"]  ), 
+                        antilogit(param["zname.int"]+
+                                    param["zname.size"]*xmat[poradX,1]+
+                                    param["zname.nak1"]  )))
+  nakazeny<-ifelse(xmat[poradX,2]=="nevim",
+                   antilogit(param["nakaz.int"]+
+                               param["nakaz.size"]*xmat[poradX,1]),
+                   ifelse (xmat[poradX,2]=="0",
+                           antilogit(param["nakaz.int"]+
+                                       param["nakaz.size"]*xmat[poradX,1]+
+                                       param["nakaz.nak0"]  ), 
+                           antilogit(param["nakaz.int"]+
+                                       param["nakaz.size"]*xmat[poradX,1]+
+                                       param["nakaz.nak1"]  )))
+  dens<- dnorm(xmat[poradY,1],mean=mu, 
+               sd=sqrt(param["rust.sigma2"]*exp(2*param["rust.sigma2.exp"]*mu)))  
+  nezname<- 1-zname 
+  zdrave<- zname*(1-nakazeny)
+  nakazky<- zname*nakazeny  
+  dens2<-  ((xmat[poradY,2]=="nevim")*nezname + (xmat[poradY,2]=="0")*zdrave +  
+              (xmat[poradY,2]=="1")*nakazky) * dens
+  return(dens2)
+}
+
+
+### Growth function for healthy populations ###
+
+rustx.zdrav=function(poradY,poradX,xmat,koef) { 
+  param<-t.param(koef)
+  mu<- param["rust.int"]+
+    param["rust.size"]*xmat[poradX,1]+
+    param["rust.size2"]*xmat[poradX,1]*xmat[poradX,1]
+  dens<- dnorm(xmat[poradY,1],mean=mu, 
+               sd=sqrt(param["rust.sigma2"]*exp(2*param["rust.sigma2.exp"]*mu)))  
+  return(dens)
+}
+
+
+### Fecundity function for diseased populations with seed predators ###
+
+rozmnx21<-function(poradX,xmat,koef){
+  param<-t.param(koef)
+  vykvete <- antilogit(param["vykve.int"]+ 
+                         param["vykve.size"]*xmat[poradX,1])
+  kvety<-ifelse(xmat[poradX,2]=="nevim",
+                exp(param["kvety.int"]+
+                      param["kvety.size"]*xmat[poradX,1]+
+                      param["kvety.size2"]*xmat[poradX,1]*xmat[poradX,1]),
+                ifelse (xmat[poradX,2]=="0",
+                        exp(param["kvety.int"]+
+                              param["kvety.size"]*xmat[poradX,1]+
+                              param["kvety.size2"]*xmat[poradX,1]*xmat[poradX,1]+
+                              param["kvety.nak0"]),
+                        exp(param["kvety.int"]+
+                              param["kvety.size"]*xmat[poradX,1]+
+                              param["kvety.size2"]*xmat[poradX,1]*xmat[poradX,1]+
+                              param["kvety.nak1"])))
+  kvety<-ifelse(kvety<0,0,kvety)  
+  nasadi<- ifelse(xmat[poradX,2]=="1", 
+                  nak<- param["pdp.tobol"]* 0.5 *antilogit(param["cast.int"] +
+                                                             param["cast.size"]*xmat[poradX,1]), 
+                  ifelse(xmat[poradX,2]=="0", 
+                        zdrav<- param["pdp.tobol"],
+                        nezn <-rowMeans(matrix(c(nak,rep(zdrav,150)),nrow=length(nak),ncol=2))))
+  pocet_s_pred<- param["pdp.preda"]*param["preda.semen"]
+  pocet_s_nepred<- (1-param["pdp.preda"])*param["nepreda.semen"]
+  pocet_semen<-pocet_s_pred+pocet_s_nepred
+  establish<-param["establish"]
+  return(vykvete*kvety*nasadi*pocet_semen*establish)
+}
+
+
+### Fecundity function for diseased populations without seed predators ###
+
+rozmnx21.np<-function(poradX,xmat,koef){
+  param<-t.param(koef)
+  vykvete <- antilogit(param["vykve.int"]+ 
+                         param["vykve.size"]*xmat[poradX,1])
+  kvety<-ifelse(xmat[poradX,2]=="nevim",
+                exp(param["kvety.int"]+
+                      param["kvety.size"]*xmat[poradX,1]+
+                      param["kvety.size2"]*xmat[poradX,1]*xmat[poradX,1]),
+                ifelse (xmat[poradX,2]=="0",
+                        exp(param["kvety.int"]+
+                              param["kvety.size"]*xmat[poradX,1]+
+                              param["kvety.size2"]*xmat[poradX,1]*xmat[poradX,1]+
+                              param["kvety.nak0"]),
+                        exp(param["kvety.int"]+
+                              param["kvety.size"]*xmat[poradX,1]+
+                              param["kvety.size2"]*xmat[poradX,1]*xmat[poradX,1]+
+                              param["kvety.nak1"])))
+  kvety<-ifelse(kvety<0,0,kvety)  
+  nasadi<- ifelse(xmat[poradX,2]=="1", 
+                  nak<- param["pdp.tobol"]* 0.5 *antilogit(param["cast.int"] +
+                                                             param["cast.size"]*xmat[poradX,1]), 
+                  ifelse(xmat[poradX,2]=="0", 
+                         zdrav<- param["pdp.tobol"],
+                         nezn <-rowMeans(matrix(c(nak,rep(zdrav,150)),nrow=length(nak),ncol=2))))
+  pocet_semen<-param["nepreda.semen"]
+  establish<-param["establish"]
+  return(vykvete*kvety*nasadi*pocet_semen*establish)
+}
+
+
+### Fecundity function for healthy populations with seed predators ###
+
+rozmnx21.zdrav<-function(poradX,xmat,koef){
+  param<-t.param(koef)
+  vykvete <- antilogit(param["vykve.int"]+ 
+                         param["vykve.size"]*xmat[poradX,1])
+  kvety<- exp(param["kvety.int"]+
+                param["kvety.size"]*xmat[poradX,1]+
+                param["kvety.size2"]*xmat[poradX,1]*xmat[poradX,1]+
+                param["kvety.nak0"])
+  kvety<-ifelse(kvety<0,0,kvety)  
+  nasadi<- param["pdp.tobol"]
+  pocet_s_pred<- param["pdp.preda"]*param["preda.semen"]
+  pocet_s_nepred<- (1-param["pdp.preda"])*param["nepreda.semen"]
+  pocet_semen<-pocet_s_pred+pocet_s_nepred
+  establish<-param["establish"]
+  return(vykvete*kvety*nasadi*pocet_semen*establish)
+}
+
+
+### Fecundity function for healthy populations without seed predators ###
+
+rozmnx21.zdrav.np<-function(poradX,xmat,koef){
+  param<-t.param(koef)
+  vykvete <- antilogit(param["vykve.int"]+ 
+                         param["vykve.size"]*xmat[poradX,1])
+  kvety<- exp(param["kvety.int"]+
+                param["kvety.size"]*xmat[poradX,1]+
+                param["kvety.size2"]*xmat[poradX,1]*xmat[poradX,1]+
+                param["kvety.nak0"])
+  kvety<-ifelse(kvety<0,0,kvety)  
+  nasadi<- param["pdp.tobol"]
+  pocet_semen<-param["nepreda.semen"]
+  establish<-param["establish"]
+  return(vykvete*kvety*nasadi*pocet_semen*establish)
+}
+
+
+### Survival function for Sdl1 (one-year-old seedlings) ###
+
+zij.sem1<-function(koef){
+  param<-t.param(koef)
+  u<-param["preziv.s1"]
+  return(u)
+}
+
+
+### Survival function for Sdl2 (two-year-old seedlings) ###
+
+zij.sem2<-function(koef){
+  param<-t.param(koef)
+  u<-param["preziv.s2"]
+  return(u)
+}
+
+
+### Survival function for Sdl3 (three-year-old seedlings) ###
+
+zij.sem3<-function(koef){
+  param<-t.param(koef)
+  u<-param["preziv.s3"]
+  return(u)
+}
+
+
+### Growth function (including disease function) for Sdl3 in diseased populations ###
+
+rust.sem<-function(poradY,xmat,koef) { 
+  param<-t.param(koef)
+  mu<-param["rust.s"]
+  zname<-param["zname.s"]
+  nakazeny<-param["nakazeny.s"]
+  dens<- dnorm(xmat[poradY,1],mean=mu, 
+               sd=sqrt(param["rust.sigma2"]*exp(2*param["rust.sigma2.exp"]*mu)))  
+  nezname<- 1-zname 
+  zdrave<- zname*(1-nakazeny)
+  nakazky<- zname*nakazeny 
+  dens2<-  ((xmat[poradY,2]=="nevim")*nezname + (xmat[poradY,2]=="0")*zdrave +  
+              (xmat[poradY,2]=="1")*nakazky ) * dens
+  return(dens2)
+}
+
+
+### Growth function for Sdl3 in healthy populations ###
+
+rust.sem.zdrav<-function(poradY,xmat,koef) { 
+  param<-t.param(koef)
+  mu<-param["rust.s"]
+  dens<- dnorm(xmat[poradY,1],mean=mu, 
+               sd=sqrt(param["rust.sigma2"]*exp(2*param["rust.sigma2.exp"]*mu)))  
+  return(dens)
+}
+
+
+### Fecundity function for Sdl3 in populations with seed predators ###
+
+rozmn.sem<-function(koef){
+  param<-t.param(koef)
+  vykvete <- param["vykve.s"]
+  kvety<- param["kvety.s"]
+  kvety<-ifelse(kvety<0,0,kvety)  
+  nasadi<- param["pdp.tobol"]
+  pocet_s_pred<- param["pdp.preda"]*param["preda.semen"]
+  pocet_s_nepred<- (1-param["pdp.preda"])*param["nepreda.semen"]
+  pocet_semen<-pocet_s_pred+pocet_s_nepred
+  establish<-param["establish"]
+  return(vykvete*kvety*nasadi*pocet_semen*establish)
+}
+
+
+### Fecundity function for Sdl3 in populations without seed predators ###
+rozmn.sem.np<-function(koef){
+  param<-t.param(koef)
+  vykvete <- param["vykve.s"]
+  kvety<- param["kvety.s"]
+  kvety<-ifelse(kvety<0,0,kvety)  
+  nasadi<- param["pdp.tobol"]
+  pocet_semen<-param["nepreda.semen"]
+  establish<-param["establish"]
+  return(vykvete*kvety*nasadi*pocet_semen*establish)
+}
+
+
+
+#################################################################################################
+### IPM kernels ###
+#################################################################################################
+
+### Preparation of discretized kernels for diseased populations (with/without seed predators) ###
+
+# Details in Merow et al. 2004 (Supplementary materials)
+
+# Notation:
+
+# minvelik = minimum plant size
+# maxvelik = maximum plant size
+# dosp12 = dataset of adult plants
+# size = plant size at t
+# sizeNext = plant size at t+1
+# nakaz_troj = disease state ('0' = Healthy, '1' = Diseased, 'nevim' = Indeterminable)
+# matice = block (i.e., site ? transition combination)
+# n = number of cells in the discretized kernel
+# b = boundary points (edges of the cells defining the kernel)
+# y = mesh points (midpoints of the cells)
+# h = step size (width of the cells)
+# xmat = matrix of meshpoints (based on plant size and disease state) 
+# porad = vector used for calling elements from xmat
+
+minvelik=log(min(c(dosp12$size,dosp12$sizeNext),na.rm=T))
+maxvelik=log(max(c(dosp12$size,dosp12$sizeNext),na.rm=T))
+n=50
+b=minvelik+c(0:n)*(maxvelik-minvelik)/n 
+y=(b[1:n]+b[2:(n+1)])/2 
+h=y[2]-y[1] 
+xmat<-data.frame(size=rep(y,3),nakaz_troj=as.factor(rep(c(0,1,"nevim"),each=n)))
+porad<-1:nrow(xmat)
+
+
+### Construction of discretized kernels for diseased populations with seed predators ###
+
+# Notation:
+
+# S.dosp = survival vector of adults
+# Gmat.dosp = growth matrix of adults
+# Pmat.dosp = growth/survival matrix of adults
+# Fvekt = fecundity vector of adults
+# S.sem1 = survival of Sdl1 (one-year-old seedlings)
+# S.sem2 = survival of Sdl2 (two-year-old seedlings)
+# S.sem3 = survival of Sdl3 (three-year-old seedlings)
+# Gvekt.sem = growth of Sdl3
+# F.sem = fecundity of Sdl3
+# Pmat.celk = growth/survival matrix of all plants
+# Fmat.celk = fecundity matrix of all plants
+# Kmat = complete matrix (kernel) of all plants
+
+ipm.list.semenac4<-lapply(vector(mode="list",length=6),function(x){x<-list(S.dosp=NA,Gmat.dosp=NA,Pmat.dosp=NA,Fvekt=NA,S.sem1=NA,S.sem2=NA,S.sem3=NA,F.sem=NA,Gvekt.sem=NA,Pmat.celk=NA,Fmat.celk=NA,Kmat=NA)})
+names(ipm.list.semenac4)<-levels(droplevels(dosp12$matice))
+
+for(i in 1:6){
+  ipm.list.semenac4[[i]]$S.dosp<-zijx(poradX=porad,xmat=xmat,koef=koef2[i,])
+  ipm.list.semenac4[[i]]$Fvekt<-rozmnx21(poradX=porad,xmat=xmat,koef=koef2[i,])
+  ipm.list.semenac4[[i]]$Gmat.dosp<-outer(porad,porad,FUN=rustx,xmat=xmat,koef=koef2[i,])
+  ipm.list.semenac4[[i]]$Gmat.dosp<-t(t(ipm.list.semenac4[[i]]$Gmat.dosp)/colSums(ipm.list.semenac4[[i]]$Gmat.dosp))
+  ipm.list.semenac4[[i]]$Pmat.dosp<-ipm.list.semenac4[[i]]$Gmat.dosp%*%diag(ipm.list.semenac4[[i]]$S.dosp)
+  
+  ipm.list.semenac4[[i]]$S.sem1<-zij.sem1(koef=koef2[i,])
+  ipm.list.semenac4[[i]]$S.sem2<-zij.sem2(koef=koef2[i,])
+  ipm.list.semenac4[[i]]$S.sem3<-zij.sem3(koef=koef2[i,])
+  ipm.list.semenac4[[i]]$F.sem<-rozmn.sem(koef=koef2[i,])
+  ipm.list.semenac4[[i]]$Gvekt.sem<-rust.sem(poradY=porad,xmat=xmat,koef=koef2[i,])
+  ipm.list.semenac4[[i]]$Gvekt.sem<-ipm.list.semenac4[[i]]$Gvekt.sem/sum(ipm.list.semenac4[[i]]$Gvekt.sem)
+  
+  ipm.list.semenac4[[i]]$Pmat.celk<-cbind(
+    ipm.list.semenac4[[i]]$Gvekt.sem*ipm.list.semenac4[[i]]$S.sem3,
+    ipm.list.semenac4[[i]]$Pmat.dosp)
+
+  ipm.list.semenac4[[i]]$Pmat.celk<-rbind(
+    rep(0,ncol(ipm.list.semenac4[[i]]$Pmat.celk)),
+    ipm.list.semenac4[[i]]$Pmat.celk)
+  
+  ipm.list.semenac4[[i]]$Pmat.celk<-rbind(
+    rep(0,ncol(ipm.list.semenac4[[i]]$Pmat.celk)),
+    rep(0,ncol(ipm.list.semenac4[[i]]$Pmat.celk)),
+    ipm.list.semenac4[[i]]$Pmat.celk)
+  
+  ipm.list.semenac4[[i]]$Pmat.celk<-cbind(
+    rep(0,nrow(ipm.list.semenac4[[i]]$Pmat.celk)),
+    rep(0,nrow(ipm.list.semenac4[[i]]$Pmat.celk)),
+    ipm.list.semenac4[[i]]$Pmat.celk)
+
+  ipm.list.semenac4[[i]]$Pmat.celk[2,1]<-ipm.list.semenac4[[i]]$S.sem1
+  ipm.list.semenac4[[i]]$Pmat.celk[3,2]<-ipm.list.semenac4[[i]]$S.sem2
+  
+  ipm.list.semenac4[[i]]$Fmat.celk<-ipm.list.semenac4[[i]]$Pmat.celk
+  ipm.list.semenac4[[i]]$Fmat.celk[,]<-0
+  ipm.list.semenac4[[i]]$Fmat.celk[1,]<-c(0,0,
+                                          ipm.list.semenac4[[i]]$F.sem,
+                                          ipm.list.semenac4[[i]]$Fvekt)
+
+  ipm.list.semenac4[[i]]$Kmat<-ipm.list.semenac4[[i]]$Pmat.celk +
+    ipm.list.semenac4[[i]]$Fmat.celk
+}
+
+
+### Construction of discretized kernels for diseased populations without seed predators ###
+
+# Difference from kernels with seed predators: 
+# vital-rates functions 'rozmnx21.np' and rozmn.sem.np' (instead of 'rozmnx21' and 'rozmn.sem')
+
+ipm.list.semenac4.np<-lapply(vector(mode="list",length=6),function(x){x<-list(S.dosp=NA,Gmat.dosp=NA,Pmat.dosp=NA,Fvekt=NA,S.sem1=NA,S.sem2=NA,S.sem3=NA,F.sem=NA,Gvekt.sem=NA,Pmat.celk=NA,Fmat.celk=NA,Kmat=NA)})
+names(ipm.list.semenac4.np)<-levels(droplevels(dosp12$matice))
+
+for(i in 1:6){
+  ipm.list.semenac4.np[[i]]$S.dosp<-zijx(poradX=porad,xmat=xmat,koef=koef2[i,])
+  ipm.list.semenac4.np[[i]]$Fvekt<-rozmnx21.np(poradX=porad,xmat=xmat,koef=koef2[i,])
+  ipm.list.semenac4.np[[i]]$Gmat.dosp<-outer(porad,porad,FUN=rustx,xmat=xmat,koef=koef2[i,])
+  ipm.list.semenac4.np[[i]]$Gmat.dosp<-t(t(ipm.list.semenac4.np[[i]]$Gmat.dosp)/colSums(ipm.list.semenac4.np[[i]]$Gmat.dosp))
+  ipm.list.semenac4.np[[i]]$Pmat.dosp<-ipm.list.semenac4.np[[i]]$Gmat.dosp%*%diag(ipm.list.semenac4.np[[i]]$S.dosp)
+  
+  ipm.list.semenac4.np[[i]]$S.sem1<-zij.sem1(koef=koef2[i,])
+  ipm.list.semenac4.np[[i]]$S.sem2<-zij.sem2(koef=koef2[i,])
+  ipm.list.semenac4.np[[i]]$S.sem3<-zij.sem3(koef=koef2[i,])
+  ipm.list.semenac4.np[[i]]$F.sem<-rozmn.sem.np(koef=koef2[i,])
+  ipm.list.semenac4.np[[i]]$Gvekt.sem<-rust.sem(poradY=porad,xmat=xmat,koef=koef2[i,])
+  ipm.list.semenac4.np[[i]]$Gvekt.sem<-ipm.list.semenac4.np[[i]]$Gvekt.sem/sum(ipm.list.semenac4.np[[i]]$Gvekt.sem)
+  
+  ipm.list.semenac4.np[[i]]$Pmat.celk<-cbind(
+    ipm.list.semenac4.np[[i]]$Gvekt.sem*ipm.list.semenac4.np[[i]]$S.sem3,
+    ipm.list.semenac4.np[[i]]$Pmat.dosp)
+
+  ipm.list.semenac4.np[[i]]$Pmat.celk<-rbind(
+    rep(0,ncol(ipm.list.semenac4.np[[i]]$Pmat.celk)),
+    ipm.list.semenac4.np[[i]]$Pmat.celk)
+  
+  ipm.list.semenac4.np[[i]]$Pmat.celk<-rbind(
+    rep(0,ncol(ipm.list.semenac4.np[[i]]$Pmat.celk)),
+    rep(0,ncol(ipm.list.semenac4.np[[i]]$Pmat.celk)),
+    ipm.list.semenac4.np[[i]]$Pmat.celk)
+  
+  ipm.list.semenac4.np[[i]]$Pmat.celk<-cbind(
+    rep(0,nrow(ipm.list.semenac4.np[[i]]$Pmat.celk)),
+    rep(0,nrow(ipm.list.semenac4.np[[i]]$Pmat.celk)),
+    ipm.list.semenac4.np[[i]]$Pmat.celk)
+  
+  ipm.list.semenac4.np[[i]]$Pmat.celk[2,1]<-ipm.list.semenac4.np[[i]]$S.sem1
+  ipm.list.semenac4.np[[i]]$Pmat.celk[3,2]<-ipm.list.semenac4.np[[i]]$S.sem2
+  
+  ipm.list.semenac4.np[[i]]$Fmat.celk<-ipm.list.semenac4.np[[i]]$Pmat.celk
+  ipm.list.semenac4.np[[i]]$Fmat.celk[,]<-0
+  ipm.list.semenac4.np[[i]]$Fmat.celk[1,]<-c(0,0,
+                                             ipm.list.semenac4.np[[i]]$F.sem,
+                                             ipm.list.semenac4.np[[i]]$Fvekt)
+  
+  ipm.list.semenac4.np[[i]]$Kmat<-ipm.list.semenac4.np[[i]]$Pmat.celk +
+    ipm.list.semenac4.np[[i]]$Fmat.celk
+}
+
+
+### Preparation of discretized kernels for healthy populations (with/without seed predators) ###
+
+# Details in Merow et al. 2004 (Supplementary materials)
+
+# Difference from kernels for diseased populations: 
+# vital rates functions with coefficients for healthy plants only ('rustx.zdrav','rust.sem.zdrav','rozmnx21.zdrav') 
+# and, consequently, only cells of kernels for healthy plants.
+
+# Notation:
+# xmat50 = matrix of meshpoints (based on plant size) 
+# porad = vector used for calling elements from xmat50
+
+minvelik=log(min(c(dosp12$size,dosp12$sizeNext),na.rm=T))
+maxvelik=log(max(c(dosp12$size,dosp12$sizeNext),na.rm=T))
+n=50 
+b=minvelik+c(0:n)*(maxvelik-minvelik)/n 
+y=(b[1:n]+b[2:(n+1)])/2
+h=y[2]-y[1]
+xmat50<-data.frame(size=rep(y,1),nakaz_troj=as.factor(rep(0,n)))
+porad<-1:nrow(xmat50)
+
+
+### Construction of discretized kernels for healthy populations with seed predators ###
+
+ipm.list.zdrav<-lapply(vector(mode="list",length=6),function(x){x<-list(S.dosp=NA,Gmat.dosp=NA,Pmat.dosp=NA,Fvekt=NA,S.sem1=NA,S.sem2=NA,S.sem3=NA,F.sem=NA,Gvekt.sem=NA,Pmat.celk=NA,Fmat.celk=NA,Kmat=NA)})
+names(ipm.list.zdrav)<-levels(droplevels(dosp12$matice))
+
+for(i in 1:6){
+  ipm.list.zdrav[[i]]$S.dosp<-zijx(poradX=porad,xmat=xmat50,koef=koef2[i,])
+  ipm.list.zdrav[[i]]$Fvekt<-rozmnx21.zdrav(poradX=porad,xmat=xmat50,koef=koef2[i,])
+  ipm.list.zdrav[[i]]$Gmat.dosp<-outer(porad,porad,FUN=rustx.zdrav,xmat=xmat50,koef=koef2[i,])
+  ipm.list.zdrav[[i]]$Gmat.dosp<-t(t(ipm.list.zdrav[[i]]$Gmat.dosp)/colSums(ipm.list.zdrav[[i]]$Gmat.dosp))
+  ipm.list.zdrav[[i]]$Pmat.dosp<-ipm.list.zdrav[[i]]$Gmat.dosp%*%diag(ipm.list.zdrav[[i]]$S.dosp)
+  
+  ipm.list.zdrav[[i]]$S.sem1<-zij.sem1(koef=koef2[i,])
+  ipm.list.zdrav[[i]]$S.sem2<-zij.sem2(koef=koef2[i,])
+  ipm.list.zdrav[[i]]$S.sem3<-zij.sem3(koef=koef2[i,])
+  ipm.list.zdrav[[i]]$F.sem<-rozmn.sem(koef=koef2[i,])
+  ipm.list.zdrav[[i]]$Gvekt.sem<-rust.sem.zdrav(poradY=porad,xmat=xmat50,koef=koef2[i,])
+  ipm.list.zdrav[[i]]$Gvekt.sem<-ipm.list.zdrav[[i]]$Gvekt.sem/sum(ipm.list.zdrav[[i]]$Gvekt.sem)
+  
+  ipm.list.zdrav[[i]]$Pmat.celk<-cbind(
+    ipm.list.zdrav[[i]]$Gvekt.sem*ipm.list.zdrav[[i]]$S.sem3,
+    ipm.list.zdrav[[i]]$Pmat.dosp)
+
+  ipm.list.zdrav[[i]]$Pmat.celk<-rbind(
+    rep(0,ncol(ipm.list.zdrav[[i]]$Pmat.celk)),
+    ipm.list.zdrav[[i]]$Pmat.celk)
+  
+  ipm.list.zdrav[[i]]$Pmat.celk<-rbind(
+    rep(0,ncol(ipm.list.zdrav[[i]]$Pmat.celk)),
+    rep(0,ncol(ipm.list.zdrav[[i]]$Pmat.celk)),
+    ipm.list.zdrav[[i]]$Pmat.celk)
+  ipm.list.zdrav[[i]]$Pmat.celk<-cbind(
+    rep(0,nrow(ipm.list.zdrav[[i]]$Pmat.celk)),
+    rep(0,nrow(ipm.list.zdrav[[i]]$Pmat.celk)),
+    ipm.list.zdrav[[i]]$Pmat.celk)
+  
+  ipm.list.zdrav[[i]]$Pmat.celk[2,1]<-ipm.list.zdrav[[i]]$S.sem1
+  ipm.list.zdrav[[i]]$Pmat.celk[3,2]<-ipm.list.zdrav[[i]]$S.sem2
+  
+  ipm.list.zdrav[[i]]$Fmat.celk<-ipm.list.zdrav[[i]]$Pmat.celk
+  ipm.list.zdrav[[i]]$Fmat.celk[,]<-0
+
+  ipm.list.zdrav[[i]]$Fmat.celk[1,]<-c(0,0,
+                                       ipm.list.zdrav[[i]]$F.sem,
+                                       ipm.list.zdrav[[i]]$Fvekt)
+
+  ipm.list.zdrav[[i]]$Kmat<-ipm.list.zdrav[[i]]$Pmat.celk +
+    ipm.list.zdrav[[i]]$Fmat.celk
+}
+
+
+### Construction of discretized kernels for healthy populations without seed predators ###
+
+# Difference from kernels with seed predators: 
+# vital-rates functions 'rozmnx21.zdrav.np' and 'rozmn.sem.np' (instead of 'rozmnx21.zdrav' and 'rozmn.sem')
+
+ipm.list.zdrav.np<-lapply(vector(mode="list",length=6),function(x){x<-list(S.dosp=NA,Gmat.dosp=NA,Pmat.dosp=NA,Fvekt=NA,S.sem1=NA,S.sem2=NA,S.sem3=NA,F.sem=NA,Gvekt.sem=NA,Pmat.celk=NA,Fmat.celk=NA,Kmat=NA)})
+names(ipm.list.zdrav.np)<-levels(droplevels(dosp12$matice))
+
+for(i in 1:6){
+  ipm.list.zdrav.np[[i]]$S.dosp<-zijx(poradX=porad,xmat=xmat50,koef=koef2[i,])
+  ipm.list.zdrav.np[[i]]$Fvekt<-rozmnx21.zdrav.np(poradX=porad,xmat=xmat50,koef=koef2[i,])
+  ipm.list.zdrav.np[[i]]$Gmat.dosp<-outer(porad,porad,FUN=rustx.zdrav,xmat=xmat50,koef=koef2[i,])
+  ipm.list.zdrav.np[[i]]$Gmat.dosp<-t(t(ipm.list.zdrav.np[[i]]$Gmat.dosp)/colSums(ipm.list.zdrav.np[[i]]$Gmat.dosp))
+  ipm.list.zdrav.np[[i]]$Pmat.dosp<-ipm.list.zdrav.np[[i]]$Gmat.dosp%*%diag(ipm.list.zdrav.np[[i]]$S.dosp)
+  
+  ipm.list.zdrav.np[[i]]$S.sem1<-zij.sem1(koef=koef2[i,])
+  ipm.list.zdrav.np[[i]]$S.sem2<-zij.sem2(koef=koef2[i,])
+  ipm.list.zdrav.np[[i]]$S.sem3<-zij.sem3(koef=koef2[i,])
+  ipm.list.zdrav.np[[i]]$F.sem<-rozmn.sem.np(koef=koef2[i,])
+  ipm.list.zdrav.np[[i]]$Gvekt.sem<-rust.sem.zdrav(poradY=porad,xmat=xmat50,koef=koef2[i,])
+  ipm.list.zdrav.np[[i]]$Gvekt.sem<-ipm.list.zdrav.np[[i]]$Gvekt.sem/sum(ipm.list.zdrav.np[[i]]$Gvekt.sem)
+  
+  ipm.list.zdrav.np[[i]]$Pmat.celk<-cbind(
+    ipm.list.zdrav.np[[i]]$Gvekt.sem*ipm.list.zdrav.np[[i]]$S.sem3,
+    ipm.list.zdrav.np[[i]]$Pmat.dosp)
+
+  ipm.list.zdrav.np[[i]]$Pmat.celk<-rbind(
+    rep(0,ncol(ipm.list.zdrav.np[[i]]$Pmat.celk)),
+    ipm.list.zdrav.np[[i]]$Pmat.celk)
+  
+  ipm.list.zdrav.np[[i]]$Pmat.celk<-rbind(
+    rep(0,ncol(ipm.list.zdrav.np[[i]]$Pmat.celk)),
+    rep(0,ncol(ipm.list.zdrav.np[[i]]$Pmat.celk)),
+    ipm.list.zdrav.np[[i]]$Pmat.celk)
+  
+  ipm.list.zdrav.np[[i]]$Pmat.celk<-cbind(
+    rep(0,nrow(ipm.list.zdrav.np[[i]]$Pmat.celk)),
+    rep(0,nrow(ipm.list.zdrav.np[[i]]$Pmat.celk)),
+    ipm.list.zdrav.np[[i]]$Pmat.celk)
+  
+  ipm.list.zdrav.np[[i]]$Pmat.celk[2,1]<-ipm.list.zdrav.np[[i]]$S.sem1
+  ipm.list.zdrav.np[[i]]$Pmat.celk[3,2]<-ipm.list.zdrav.np[[i]]$S.sem2
+  
+  ipm.list.zdrav.np[[i]]$Fmat.celk<-ipm.list.zdrav.np[[i]]$Pmat.celk
+  ipm.list.zdrav.np[[i]]$Fmat.celk[,]<-0
+
+  ipm.list.zdrav.np[[i]]$Fmat.celk[1,]<-c(0,0,
+                                          ipm.list.zdrav.np[[i]]$F.sem,
+                                          ipm.list.zdrav.np[[i]]$Fvekt)
+
+  ipm.list.zdrav.np[[i]]$Kmat<-ipm.list.zdrav.np[[i]]$Pmat.celk +
+    ipm.list.zdrav.np[[i]]$Fmat.celk
+}
+
+
+
+#################################################################################################
+### Population growth rates ###
+#################################################################################################
+
+lambdas<-matrix(NA, nrow=4, ncol=3)
+colnames(lambdas)<-c("Site A","Site B","Site C")
+rownames(lambdas)<-c("Diseased with seed pred","Diseased without seed pred", "Healthy with seed pred", "Healthy without seed pred")
+
+
+### Stochastic population growth rates for diseased populations with seed predators ###
+
+lambdas[1,1]<-exp(stochGrowthRateSampleList(list(ipm.list.semenac4[[1]]$Kmat,ipm.list.semenac4[[4]]$Kmat),nRunIn=1000,tMax=10000))
+lambdas[1,2]<- exp(stochGrowthRateSampleList(list(ipm.list.semenac4[[2]]$Kmat,ipm.list.semenac4[[5]]$Kmat),nRunIn=1000,tMax=10000))
+lambdas[1,3]<-exp(stochGrowthRateSampleList(list(ipm.list.semenac4[[3]]$Kmat,ipm.list.semenac4[[6]]$Kmat),nRunIn=1000,tMax=10000))
+
+
+### Stochastic population growth rates for diseased populations without seed predators ###
+
+lambdas[2,1]<- exp(stochGrowthRateSampleList(list(ipm.list.semenac4.np[[1]]$Kmat,ipm.list.semenac4.np[[4]]$Kmat),nRunIn=1000,tMax=10000))
+lambdas[2,2]<- exp(stochGrowthRateSampleList(list(ipm.list.semenac4.np[[2]]$Kmat,ipm.list.semenac4.np[[5]]$Kmat),nRunIn=1000,tMax=10000))
+lambdas[2,3]<- exp(stochGrowthRateSampleList(list(ipm.list.semenac4.np[[3]]$Kmat,ipm.list.semenac4.np[[6]]$Kmat),nRunIn=1000,tMax=10000))
+
+
+### Stochastic population growth rates for healthy populations with seed predators ###
+
+lambdas[3,1]<-exp(stochGrowthRateSampleList(list(ipm.list.zdrav[[1]]$Kmat,ipm.list.zdrav[[4]]$Kmat),nRunIn=1000,tMax=10000))
+lambdas[3,2]<-exp(stochGrowthRateSampleList(list(ipm.list.zdrav[[2]]$Kmat,ipm.list.zdrav[[5]]$Kmat),nRunIn=1000,tMax=10000))
+lambdas[3,3]<-exp(stochGrowthRateSampleList(list(ipm.list.zdrav[[3]]$Kmat,ipm.list.zdrav[[6]]$Kmat),nRunIn=1000,tMax=10000))
+
+
+### Stochastic population growth rates for healthy populations without seed predators ###
+
+lambdas[4,1]<- exp(stochGrowthRateSampleList(list(ipm.list.zdrav.np[[1]]$Kmat,ipm.list.zdrav.np[[4]]$Kmat),nRunIn=1000,tMax=10000))
+lambdas[4,2]<- exp(stochGrowthRateSampleList(list(ipm.list.zdrav.np[[2]]$Kmat,ipm.list.zdrav.np[[5]]$Kmat),nRunIn=1000,tMax=10000))
+lambdas[4,3]<-exp(stochGrowthRateSampleList(list(ipm.list.zdrav.np[[3]]$Kmat,ipm.list.zdrav.np[[6]]$Kmat),nRunIn=1000,tMax=10000))
+
+
+
+#################################################################################################
+### Elasticities of population growth rates ###
+#################################################################################################
+
+### Elasticities of stochastic population growth rates for diseased populations with seed predators ###
+
+# Elasticities for Site A ('elastA'), Site B ('elastB') and Site C ('elastC').
+# Elasticities are to be found in the object 'elasticities' within 'elastA' etc.
+
+elastA<-stoch.sens(list(ipm.list.semenac4[[1]]$Kmat,ipm.list.semenac4[[4]]$Kmat),tlimit = 1000)
+
+elastB<-stoch.sens(list(ipm.list.semenac4[[2]]$Kmat,ipm.list.semenac4[[5]]$Kmat),tlimit = 1000)
+
+elastC<-stoch.sens(list(ipm.list.semenac4[[3]]$Kmat,ipm.list.semenac4[[6]]$Kmat),tlimit = 1000)
+
+
+
+#################################################################################################
+### Stable stage distribution ###
+#################################################################################################
+
+### Function for stochastic calculation of stable stage distribution (SSD)
+
+# The function is based on functions stochGrowthRateSampleList() a stochGrowthRateManyCov() from IPMpack.
+# The function returns:
+# (1) stochastic population growth rates (object 'Rt'; the same result as by using stochGrowthRateSampleList())
+# (2) population vectors from each step of simulation recalculated to sum to 1 (object 'rc.relative' when parameter 'trackStruct' = FALSE; these vectors can be averaged to obtain stochastic SSD) 
+# (3) population vectors from each step of simulation without recalculation (object 'rc' when parameter 'trackStruct' = TRUE).
+
+simulace<-function (nRunIn, tMax, listIPMmatrix = NULL,trackStruct = FALSE) {
+  nmatrices <- length(listIPMmatrix)
+  nBigMatrix <- length(listIPMmatrix[[1]][, 1])
+  nt <- rep(1, nBigMatrix)
+  Rt <- rep(NA, tMax)
+  rc <- matrix(NA, nBigMatrix, tMax)
+  rc.relative <- matrix(NA, nBigMatrix, tMax)
+  for (t in 1:tMax) {
+    year.type <- sample(1:nmatrices, size = 1, replace = FALSE)
+    nt1 <- listIPMmatrix[[year.type]] %*% nt
+    sum.nt1 <- sum(nt1)
+    if (!trackStruct) {
+      Rt[t] <- log(sum.nt1)
+      nt <- nt1/sum.nt1
+      rc.relative[, t] <- nt
+    } 
+    else {
+      nt <- nt1
+      rc[, t] <- nt1
+    }
+  }
+  
+  if (!trackStruct) {
+    res <- mean(Rt[nRunIn:tMax], na.rm = TRUE)
+    return(list(Rt=res,rc.relative=rc.relative))
+  }
+  else {   
+    return(list(rc=rc))
+  }
+}
+
+
+### Calculation of population vectors for SSD in diseased populations with seed predators ###
+
+# For Site A ('SSD_A'), Site B ('SSD_B') and Site C ('SSD_C')
+# Population vectors are to be found in the object 'rc.relative' within 'SSD_A' etc. 
+# These vectors then have to be averaged to obtain stochastic SSD.
+
+SSD_A<-simulace(list(ipm.list.semenac4[[1]]$Kmat,ipm.list.semenac4[[4]]$Kmat),nRunIn=1000,tMax=10000)
+
+SSD_B<-simulace(list(ipm.list.semenac4[[2]]$Kmat,ipm.list.semenac4[[5]]$Kmat),nRunIn=1000,tMax=10000)
+
+SSD_C<-simulace(list(ipm.list.semenac4[[3]]$Kmat,ipm.list.semenac4[[6]]$Kmat),nRunIn=1000,tMax=10000)
+
+
+### Stochastic SSD obtained by averaging of population vectors for all plants divided into six categories ###
+
+# Six categories of plants: Sdl1, Sdl2, Sdl3, Healthy, Diseased, Indeterminable
+
+stochSSD<-matrix(NA,ncol=6,nrow=3)
+rownames(stochSSD)<-c("Site A","Site B","Site C")
+colnames(stochSSD)<-c("Sdl1","Sdl2","Sdl3","Healthy","Diseased","Indeterm.")
+stochSSD[1,1]<-rowMeans(SSD_A$rc.relative[,1000:10000])[1]
+stochSSD[1,2]<-rowMeans(SSD_A$rc.relative[,1000:10000])[2]
+stochSSD[1,3]<-rowMeans(SSD_A$rc.relative[,1000:10000])[3]
+stochSSD[1,4]<-sum(rowMeans(SSD_A$rc.relative[,1000:10000])[4:53])
+stochSSD[1,5]<-sum(rowMeans(SSD_A$rc.relative[,1000:10000])[54:103])
+stochSSD[1,6]<-sum(rowMeans(SSD_A$rc.relative[,1000:10000])[104:153])
+stochSSD[2,1]<-rowMeans(SSD_B$rc.relative[,1000:10000])[1]
+stochSSD[2,2]<-rowMeans(SSD_B$rc.relative[,1000:10000])[2]
+stochSSD[2,3]<-rowMeans(SSD_B$rc.relative[,1000:10000])[3]
+stochSSD[2,4]<-sum(rowMeans(SSD_B$rc.relative[,1000:10000])[4:53])
+stochSSD[2,5]<-sum(rowMeans(SSD_B$rc.relative[,1000:10000])[54:103])
+stochSSD[2,6]<-sum(rowMeans(SSD_B$rc.relative[,1000:10000])[104:153])
+stochSSD[3,1]<-rowMeans(SSD_C$rc.relative[,1000:10000])[1]
+stochSSD[3,2]<-rowMeans(SSD_C$rc.relative[,1000:10000])[2]
+stochSSD[3,3]<-rowMeans(SSD_C$rc.relative[,1000:10000])[3]
+stochSSD[3,4]<-sum(rowMeans(SSD_C$rc.relative[,1000:10000])[4:53])
+stochSSD[3,5]<-sum(rowMeans(SSD_C$rc.relative[,1000:10000])[54:103])
+stochSSD[3,6]<-sum(rowMeans(SSD_C$rc.relative[,1000:10000])[104:153])
+
+
+### Stochastic SSD obtained by averaging of population vectors for adult plants with respect to plant size ###
+
+stochSSD.size<-matrix(NA,nrow=150,ncol=3)
+colnames(stochSSD.size)<-c("Site A","Site B","Site C")
+rownames(stochSSD.size)<-rep(c("Healthy","Diseased","Indeterm."),each=50)
+stochSSD.size[,1]<-rowMeans(SSD_A$rc.relative[,1000:10000])[4:153]
+stochSSD.size[,2]<-rowMeans(SSD_B$rc.relative[,1000:10000])[4:153]
+stochSSD.size[,3]<-rowMeans(SSD_C$rc.relative[,1000:10000])[4:153]
+for(i in 1:3) {
+  stochSSD.size[,i]<-stochSSD.size[,i]/sum(stochSSD.size[,i])
+}
+
+
+#################################################################################################
