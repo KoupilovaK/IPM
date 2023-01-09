@@ -6,8 +6,12 @@ Title: Anther smut pathogens as important drivers of population dynamics of long
 
 Authors: Koupilova Klara (corresponding author), Koubek Tomas, Kasner Marek, Janovsky Zdenek
 
+Journal: Perspectives in Plant Ecology, Evolution and Systematics
+
 Year: to be updated
 
-Journal: Perspectives in Plant Ecology, Evolution and Systematics
+Volume: to be updated
+
+Pages: to be updated
 
 DOI: to be updated
