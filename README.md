@@ -1,5 +1,4 @@
 # IPM
-R-code for construction of IPM model
 
 This R-code was used to create the IPM model published in the following original paper:
 
